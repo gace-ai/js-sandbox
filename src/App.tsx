@@ -1,8 +1,6 @@
-import { useState, useEffect } from 'react';
 import './App.css';
-import { initSandbox, runInSandbox } from './sandbox';
-import type { Rule } from './sandbox';
-import type { QuickJSWASMModule } from 'quickjs-emscripten';
+import { useSandbox } from './hooks/useSandbox';
+import type { Rule, DOMOperation } from './sandbox';
 
 const defaultCode = `
 // This runs inside the QuickJS sandbox
@@ -29,67 +27,40 @@ script.src = 'http://evil.com/xss.js';
 document.head.appendChild(script);
 `;
 
-function App() {
-  const [code, setCode] = useState(() => localStorage.getItem('sandboxCode') || defaultCode);
-
-  useEffect(() => {
-    localStorage.setItem('sandboxCode', code);
-  }, [code]);
-
-  const [logs, setLogs] = useState<string[]>([]);
-  const [qjsInstance, setQjsInstance] = useState<QuickJSWASMModule | null>(null);
-
-  useEffect(() => {
-    initSandbox().then(qjs => {
-      setQjsInstance(qjs);
-      addLog('QuickJS VM Engine ready.');
-    }).catch(err => {
-      addLog('Failed to initialize QuickJS: ' + err);
-    });
-  }, []);
-
-  const addLog = (msg: string) => {
-    setLogs(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${msg}`]);
-  };
-
-  const handleRun = () => {
-    if (!qjsInstance) {
-      addLog('Wait for VM to be ready...');
-      return;
-    }
-
-    addLog('Executing sandbox code...');
-
-    // Define a basic filter
-    const rules: Rule[] = [
-      (op) => {
-        // Block script and iframe creation
-        if (op.type === 'call' && op.method === 'createElement') {
-          const tag = op.args[0]?.toLowerCase();
-          if (tag === 'script' || tag === 'iframe') {
-            addLog(`BLOCKED: attempt to create <${tag}>`);
-            return false;
-          }
-        }
-
-        // Block setting innerHTML
-        if (op.type === 'set' && op.prop === 'innerHTML') {
-          addLog(`BLOCKED: attempt to set innerHTML`);
-          return false;
-        }
-
-        addLog(`ALLOW: ${op.type} on node(${op.nodeId}) - ${op.prop || op.method}`);
-        return true;
+const filterRules: Rule[] = [
+  (op: DOMOperation) => {
+    // Block script and iframe creation
+    if (op.type === 'call' && op.method === 'createElement') {
+      const tag = String(op.args[0])?.toLowerCase();
+      if (tag === 'script' || tag === 'iframe') {
+        console.warn(`BLOCKED: attempt to create <${tag}>`);
+        return false;
       }
-    ];
-
-    try {
-      runInSandbox(qjsInstance, code, rules);
-      addLog('Execution completed.');
-    } catch (err: any) {
-      addLog('Execution failed: ' + err.message);
     }
-  };
+
+    // Block setting innerHTML
+    if (op.type === 'set' && op.prop === 'innerHTML') {
+      console.warn(`BLOCKED: attempt to set innerHTML`);
+      return false;
+    }
+
+    // If you wish to dump logs inside React, you can optionally capture the rule execution,
+    // though native console behaves better.
+    console.log(`ALLOW: ${op.type} on node(${op.nodeId}) - ${'prop' in op ? op.prop : op.method}`);
+    return true;
+  }
+];
+
+function App() {
+  const {
+    code,
+    setCode,
+    logs,
+    runCode,
+    qjsReady,
+    resetPage,
+    resetCode
+  } = useSandbox(defaultCode);
 
   return (
     <div className="container">
@@ -102,25 +73,19 @@ function App() {
           spellCheck="false"
         />
         <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={handleRun} disabled={!qjsInstance}>
+          <button onClick={() => runCode(filterRules)} disabled={!qjsReady}>
             Run Sandboxed Code
           </button>
-          <button
-            onClick={() => window.location.reload()}
-            style={{ backgroundColor: '#fa5252' }}
-          >
+          <button onClick={resetPage} style={{ backgroundColor: '#fa5252' }}>
             Reset Page
           </button>
-          <button
-            onClick={() => setCode(defaultCode)}
-            style={{ backgroundColor: '#868e96' }}
-          >
+          <button onClick={resetCode} style={{ backgroundColor: '#868e96' }}>
             Reset Code
           </button>
         </div>
 
         <div className="logs-container">
-          <h3>Filter Logs</h3>
+          <h3>Sandbox Logs Engine</h3>
           <div className="logs">
             {logs.map((log, i) => (
               <div key={i}>{log}</div>

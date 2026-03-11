@@ -1,0 +1,146 @@
+// Auto injects into the scope a small Proxy, that's attached to all of the exposed elements and handles the communication with host.
+const s = new Sandbox({
+	qjs: qjsEmscriptenInstance,
+});
+
+// all exposed fields are assigned to globalThis in sandbox
+const exposedApi = s.expose({
+	document: s.mutableRef(window.document).intercept(...),
+	sdk: s.obj({
+		args: s.value({"some": "array", "that-will-be": "converted-into-json-string"}).
+		http: s.obj({
+			async get(url: string) {
+				return s.ref(await fetch(url));
+			},
+		}),
+		areAllElemsObjects(arr: any[]) {
+		  return arr.every(obj => typeof obj === "object");
+		}
+	}),
+});
+
+// the future idea (a concept for now):
+// use case: to allow to export types, so we can bundle it into .d.ts and ship for snadbox builder.
+export type Api = typeof exposedApi;
+
+
+// Also tricks like this are allowed:
+return s.ref(await fetch(url))
+	 // triggered if sandbox tries to do sth on the ref, or it's properties (including nested),
+	 // what would not trigger it: const response = await sdk.http.get(url) -> it just returned the reference
+	 // what would trigger it: response.text, response.text(), response(), const status = response.status, status.ok
+	 // intercept can e.g. modify response, or throw error to block it
+	.intercept((op, next) => {
+		if(op.notNestedTarget) return next(op); // if about the ref itself, not a property of it, skip
+
+		if(op.type === "get" && op.prop === "text") {
+			console.log("sandbox just tried to access res.text!");
+		}
+		if(op.target === Response.prototype.text && op.type === "call") {
+			if(op.args.length !== 0) throw new Error("Response.text cannot take any arguments!");
+			return op.target();
+		}
+		return next(op);
+		// btw to get and modify response for example, we can do: const response = next(op);
+	});
+
+
+// examples of api calls under the hood:
+
+// __sandbox_invoke definition:
+__sandbox_invoke(action: string, properties: string, value?: string): string | Promise<string>;
+
+__sandbox_invoke('get', 'sdk.args'); // response: '{"__data": {"some": "array", "that-will-be": "converted-into-json-string"}}'
+/*
+Other respnse types:
+{"__ref": 14} // returns reference (more on that later), the reference is just a number
+{"__fn": true} // informs, it should be called, not got, as it's a function
+{"__data": "any-primitive, or object or array, that's value copied, not shared by reference"}
+*/
+
+__sandbox_invoke('get', 'sdk.http') // response '{"__obj": true}'
+
+__sandbox_invoke('get', 'sdk.http.get') // response '{"__fn": true}'
+
+__sandbox_invoke('call', 'sdk.http.get', '{"__data": ["example.com"]}') // response: a Promise<string> that resolves to: '{"__ref": 47}'
+
+__sandbox_invoke('get', 'sdk.non_existing') // response '{"__undefined": true}'
+
+__sandbox_invoke('get', '#47.text') // response '{"__fn": true}'
+
+__sandbox_invoke('call', '#47.text') // response: a Promise<string> that resolves to: '{"__data": "here goes entire raw text response"}'
+
+// as for calling json, depends on wehter it returns json (like by default it does), or whether it is wrapped in s.value(). In first case scenario, it returns ref, in second one, object as __data
+// let's say it returned a __ref:
+
+__sandbox_invoke('call', '#47.json') // response: a Promise<string> that resolves to: '{"__ref": 48}'
+// we don't need to fetch all the data here into the sandbox, if we want to pass them further, e.g. of what I mean:
+
+__sandbox_invoke('call', 'sdk.areAllElemsObjects', "__data": '[{"__ref": 48}]')
+
+
+
+// about error case (plot twist, we return ref to the error value ; ) )
+
+// we wanna use this architecture to preserve real bahaviour and avoid pollyfiling as much as possible.
+// Although we probably won't be able (at least that's what I think) to allow sandobx code to do sth like: if(err instanceof ...), we can catch (on the host) all errors, then proxy them as __sandbox_invoke ref response, and throw them.
+
+// That way all the methods on the err, as well as original value will be preserved.
+// Just like this:
+__sandbox_invoke('call', 'sdk.http.get', '{"__data": ["doesnt-exists.com"]}') // response: a Promise<string> that resolves to: '{"__error: { __ref": 87}}'
+
+
+
+// more on ref:
+
+// in this case, if sandbox invokes await (await req).json() it becomes by default a referece, because a json isn't a primitive.
+// That happens because everything passed from the host, that isn't marked as mutableRef, or as a s.value and isn't a primitive, gets auto passed as immutable ref (s.ref).
+s.ref(fetch(url));
+
+// if we wanna pass it as a value, we can simply do:
+s.ref(fetch(url))
+	.intercept((op, next) => {
+		if(op.prop = "json" && op.type === "get") {
+			return () => op.target().then(s.value);
+		}
+		return next(op);
+	});
+
+/*
+So the decision tree looks like:
+
+1. Did it thrown an error that we caught? If yes, return immutable ref to error.
+2. Is it a primitive? If yes, no matter what, just return a value
+3. Is it market as s.value? If yes, pass as the value
+4. Is it marked as mutableRef? If yes, pass the mutable ref.
+5. Is it marked as a ref? If yes, pass the immutable ref.
+6. Is it not market at all? If yes, check what was he's nearest parent marked as? If it was marked as mutable ref,
+all children, unless manually marked by the host as sth else, should be passed as a mutable ref, analogically for s.ref.
+If non of parents, were marked as anything, then it should be immutable ref.
+*/
+
+// What about this situation:
+let a = {b: "some value"};
+s.expose({
+	obj: { a }
+});
+
+// when user on sandbox calls:
+const a = obj.a;
+// and then
+console.log(a.b);
+// it seems like we could just make him call under the hood:
+__sandbox_invoke('get', 'obj.a');
+__sandbox_invoke('get', 'obj.a.b');
+
+// but that's wrong approach. What if the host changes variable like this:
+a = [a.b];
+
+// Now to access b value you would need to write:
+__sandbox_invoke('get', 'obj.a[0]');
+// And sandbox doesn't know that.
+
+// Because of that, we cannot write any "improvements" like this, and need to always create a reference, when not marked as s.obj:
+__sandbox_invoke('get', 'obj.a'); // would return ref, e.g. with id 671
+__sandbox_invoke('get', '#671.b'); // would return "some value"
+
