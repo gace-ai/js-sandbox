@@ -1,6 +1,6 @@
 import { ExtensionCodec } from "@msgpack/msgpack";
-import { atomValue, Ref, Namespace, FunctionMarker, Err } from "./types";
-import { pipeDecodeFunctionFromSandbox, pipeDecodeRefFromSandbox, pipeDecodeErrFromSandbox, pipeDecodeNamespaceFromSandbox } from "./pipes";
+import { atomValue, Ref, MutableRef, Namespace, FunctionMarker, Err } from "./types";
+import { pipeDecodeFunctionFromSandbox, pipeDecodeRefFromSandbox, pipeDecodeMutableRefFromSandbox, pipeDecodeErrFromSandbox, pipeDecodeNamespaceFromSandbox } from "./pipes";
 
 /**
  * In the comments there will be a flag indicating whether it can be
@@ -38,7 +38,7 @@ export function getExtensionCodec(fromSandbox: boolean, resolveRef: (ref: Ref) =
             const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
             const ref = new Ref(view.getUint32(0));
 
-            if (fromSandbox) pipeDecodeRefFromSandbox(ref, resolveRef);
+            if (fromSandbox) return pipeDecodeRefFromSandbox(ref, resolveRef);
             return ref;
         },
     });
@@ -89,6 +89,25 @@ export function getExtensionCodec(fromSandbox: boolean, resolveRef: (ref: Ref) =
         decode: (_data) => {
             if (fromSandbox) return pipeDecodeNamespaceFromSandbox();
             return new Namespace()
+        },
+    });
+
+    // EXTENSION 6: MutableRef (Payload: u32)
+    // [FROM_HOST_ONLY]
+    extensionCodec.register({
+        type: 6,
+        encode: (object) => {
+            if (object instanceof MutableRef) {
+                return numberToU32Buffer(object.value);
+            }
+            return null;
+        },
+        decode: (data) => {
+            const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+            const mutableRef = new MutableRef(view.getUint32(0));
+
+            if (fromSandbox) return pipeDecodeMutableRefFromSandbox(mutableRef, resolveRef);
+            return mutableRef;
         },
     });
 

@@ -1,0 +1,32 @@
+{
+  "name": "sandbox",
+  "version": "1.0.0",
+  "description": "Generic sandbox library — expose any API to a QuickJS sandbox",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "packageManager": "pnpm@10.24.0",
+  "devDependencies": {
+    "esbuild-raw-plugin": "^0.3.1",
+    "tsup": "^8.0.0",
+    "typescript": "~5.9.3"
+  },
+  "dependencies": {
+    "communication-protocol": "workspace:*",
+    "polyfill": "workspace:*",
+    "quickjs-emscripten": "^0.32.0"
+  }
+}

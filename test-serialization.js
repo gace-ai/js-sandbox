@@ -1,0 +1,11 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+var communication_protocol_1 = require("communication-protocol");
+console.log('Testing MutableRef serialization');
+var ref = new communication_protocol_1.MutableRef(42);
+console.log('Is instance?', ref instanceof communication_protocol_1.MutableRef);
+var bytes = (0, communication_protocol_1.serializeHost)(ref, function (r) { return null; });
+console.log('Bytes length:', bytes.length);
+console.log('Decoding...');
+var decoded = (0, communication_protocol_1.deserializeHost)(bytes, function (r) { return null; });
+console.log('Decoded type:', decoded.constructor.name, decoded.value);

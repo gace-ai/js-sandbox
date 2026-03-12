@@ -2,6 +2,10 @@ export class Ref {
     constructor(public value: number) {}
 }
 
+export class MutableRef {
+    constructor(public value: number) {}
+}
+
 // All errors are passed via Ref
 // IMPORTANT: Err does not extend Ref, so it doesn't pass error instanceof Ref
 export class Err {
@@ -12,6 +16,6 @@ export class Namespace {
     constructor() {}
 }
 
-export const FunctionMarker = Symbol("function");
+export const FunctionMarker = Symbol.for("gace.function");
 
 export const atomValue = new Uint8Array(0);

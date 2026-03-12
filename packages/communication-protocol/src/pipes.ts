@@ -1,4 +1,4 @@
-import { Err, Ref } from "./types";
+import { Err, MutableRef, Ref } from "./types";
 
 /**
  * Context: When we pass ref to the sandbox, we can simply pass the id,
@@ -8,6 +8,10 @@ import { Err, Ref } from "./types";
  */
 export function pipeDecodeRefFromSandbox(ref: Ref, resolveRef: (ref: Ref) => unknown) {
     return resolveRef(ref);
+}
+
+export function pipeDecodeMutableRefFromSandbox(mutableRef: MutableRef, resolveRef: (ref: Ref) => unknown) {
+    return resolveRef(mutableRef);
 }
 
 export function pipeDecodeFunctionFromSandbox() {
