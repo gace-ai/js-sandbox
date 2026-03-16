@@ -1,6 +1,7 @@
 {
   "name": "@gace/sandbox",
   "version": "0.0.1",
+  "repository": "https://github.com/gace-ai/js-sandbox",
   "description": "General purpose sandbox, that let's you pass a reference from host",
   "type": "module",
   "main": "./dist/index.js",
