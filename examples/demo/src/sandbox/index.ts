@@ -1,6 +1,6 @@
 import { getQuickJS } from 'quickjs-emscripten';
 import type { QuickJSWASMModule } from 'quickjs-emscripten';
-import { Sandbox, type InterceptorFn } from 'sandbox';
+import { Sandbox, type InterceptorFn } from '@gace/sandbox';
 
 export type { InterceptorFn };
 
@@ -18,7 +18,6 @@ export async function initSandbox(): Promise<QuickJSWASMModule> {
 export function runInSandbox(
     qjs: QuickJSWASMModule,
     code: string,
-    interceptors: InterceptorFn[] = [],
 ) {
     const vm = qjs.newContext();
     const s = new Sandbox({ vm });
@@ -29,11 +28,6 @@ export function runInSandbox(
             console: { log: console.log },
             sdk: {
                 getWindow: () => s.ref(window)
-                    .intercept((op, next) => {
-                        console.log(op, next);
-                        return "kurwa maciek";
-                        return next(op);
-                    }),
             },
         });
 

@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import type { QuickJSWASMModule } from 'quickjs-emscripten';
-import { initSandbox, runInSandbox, type InterceptorFn } from '../sandbox';
+import { initSandbox, runInSandbox } from '../sandbox';
 
 export function useSandbox(initialCode: string) {
     const [code, setCode] = useState(() => localStorage.getItem('sandboxCode') || initialCode);
@@ -37,7 +37,7 @@ export function useSandbox(initialCode: string) {
         };
     }, [connectQjs]);
 
-    const runCode = useCallback((interceptors: InterceptorFn[] = []) => {
+    const runCode = useCallback(() => {
         if (!qjsInstance) {
             addLog('Wait for VM to be ready...');
             return;
@@ -46,7 +46,7 @@ export function useSandbox(initialCode: string) {
         addLog('Executing sandbox code...');
 
         try {
-            runInSandbox(qjsInstance, code, interceptors);
+            runInSandbox(qjsInstance, code);
             addLog('Execution completed.');
         } catch (err: any) {
             addLog('Execution failed: ' + err.message);
