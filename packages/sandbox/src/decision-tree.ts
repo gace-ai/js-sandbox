@@ -7,6 +7,7 @@ import {
     isSandboxValue,
     isSandboxNamespace,
 } from './types';
+import { assertSafeReference } from './security';
 
 /**
  * Decision tree for serializing a host value before sending to sandbox.
@@ -26,6 +27,8 @@ export function resolveValueForSandbox(
     registry: ReferenceRegistry,
     parentMode: RefMode = 'ref',
 ): unknown {
+    assertSafeReference(value);
+
     // 1. Primitives — pass through directly (msgpack serializes natively)
     if (value === null || value === undefined) return value;
 

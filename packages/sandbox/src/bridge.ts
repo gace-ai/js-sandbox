@@ -5,6 +5,7 @@ import { runInterceptors } from './interceptor';
 import { resolveValueForSandbox, resolveErrorForSandbox } from './decision-tree';
 import type { InterceptorOp, RefMode } from './types';
 import { isSandboxNamespace, isSandboxRef, isSandboxMutableRef, isSandboxValue } from './types';
+import { assertSafeProp } from './security';
 
 /**
  * The bridge between the host and QuickJS sandbox.
@@ -65,6 +66,7 @@ export class Bridge {
         let parentMode: RefMode = 'ref';
 
         for (const segment of path) {
+            assertSafeProp(segment);
             if (current === null || current === undefined) {
                 return { value: undefined, parentMode };
             }
@@ -166,6 +168,7 @@ export class Bridge {
         try {
             switch (action) {
                 case 'get': {
+                    if (prop) assertSafeProp(prop);
                     const op: InterceptorOp = {
                         type: 'get',
                         prop,
@@ -182,6 +185,7 @@ export class Bridge {
                 }
 
                 case 'set': {
+                    if (prop) assertSafeProp(prop);
                     if (mode !== 'mutableRef') {
                         return this.encode(undefined);
                     }
@@ -207,6 +211,7 @@ export class Bridge {
                 }
 
                 case 'call': {
+                    if (prop) assertSafeProp(prop);
                     const args: unknown[] = payloadBytes
                         ? deserializeHost(payloadBytes, this.resolveRef)
                         : [];

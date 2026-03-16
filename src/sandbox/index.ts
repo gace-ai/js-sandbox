@@ -28,7 +28,12 @@ export function runInSandbox(
             document: s.mutableRef(document),
             console: { log: console.log },
             sdk: {
-                getWindow: () => window,
+                getWindow: () => s.ref(window)
+                    .intercept((op, next) => {
+                        console.log(op, next);
+                        return "kurwa maciek";
+                        return next(op);
+                    }),
             },
         });
 
