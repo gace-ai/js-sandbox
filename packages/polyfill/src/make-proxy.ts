@@ -13,25 +13,34 @@ function isPrimitive(value: unknown): boolean {
 }
 
 // __sandbox_invoke is provided by the host (registered on globalThis by the bridge).
-// It returns ArrayBuffer (from QuickJS's newArrayBuffer), so we always wrap in Uint8Array.
-declare function __sandbox_invoke(action: string, target: string, payload?: ArrayBuffer): ArrayBuffer;
+// Returns ArrayBuffer for sync ops, or a QuickJS Promise for async ops.
+declare function __sandbox_invoke(action: string, target: string, payload?: ArrayBuffer): ArrayBuffer | PromiseLike<ArrayBuffer>;
+
+function isThenable(v: unknown): v is PromiseLike<any> {
+    return v !== null && typeof v === 'object' && typeof (v as any).then === 'function';
+}
 
 /**
  * Call __sandbox_invoke and decode the response.
- * Handles ArrayBuffer→Uint8Array conversion required by msgpack.
+ * Handles both synchronous (ArrayBuffer) and asynchronous (Promise) results.
  */
 export function invoke(action: string, target: string, payload?: Uint8Array): unknown {
     let rawPayload: ArrayBuffer | undefined;
     if (payload) {
-        // Very important: payload is a Uint8Array, which is a view over an ArrayBuffer.
-        // The underlying ArrayBuffer may be massive. QuickJS will die trying to copy it.
-        // We force an explicit copy of JUST the exact bytes using .slice().
         rawPayload = payload.slice().buffer;
     }
 
-    const resultBuffer = __sandbox_invoke(action, target, rawPayload);
-    if (!resultBuffer) return undefined;
-    return deserializeSandbox(new Uint8Array(resultBuffer));
+    const result = __sandbox_invoke(action, target, rawPayload);
+    if (!result) return undefined;
+
+    if (isThenable(result)) {
+        return result.then((buf: ArrayBuffer) => {
+            if (!buf) return undefined;
+            return deserializeSandbox(new Uint8Array(buf));
+        });
+    }
+
+    return deserializeSandbox(new Uint8Array(result as ArrayBuffer));
 }
 
 /**
@@ -49,6 +58,11 @@ export function handleResponse(
     parentPath?: number | string,
     prop?: string,
 ): unknown {
+    // Async result — chain through handleResponse once resolved
+    if (isThenable(decoded)) {
+        return (decoded as PromiseLike<unknown>).then((d: unknown) => handleResponse(d, parentPath, prop));
+    }
+
     // Primitives pass through
     if (isPrimitive(decoded)) return decoded;
 
@@ -126,6 +140,10 @@ export function refProxy(ref: Ref | MutableRef, isMutable: boolean): unknown {
         get(_, prop) {
             if (prop === '__ref_id') return ref.value;
             if (typeof prop === 'symbol') return undefined;
+            // Prevent ref proxies from being treated as thenables.
+            // Without this, `await refProxy` would trigger an infinite
+            // loop: JS checks .then → get trap → invoke → ...
+            if (prop === 'then') return undefined;
 
             const decoded = invoke('get', `#${ref.value}.${prop}`);
             return handleResponse(decoded, ref.value, prop);

@@ -181,6 +181,12 @@ export class Bridge {
                         return (finalOp.target as any)[finalOp.prop];
                     });
 
+                    if (result instanceof Promise) {
+                        return result
+                            .then((resolved) => this.encodeResult(resolved, mode))
+                            .catch((err) => this.encode(resolveErrorForSandbox(err, this.registry)));
+                    }
+
                     return this.encodeResult(result, mode);
                 }
 
@@ -206,6 +212,12 @@ export class Bridge {
                         (finalOp.target as any)[finalOp.prop] = finalOp.value;
                         return undefined;
                     });
+
+                    if (result instanceof Promise) {
+                        return result
+                            .then((resolved) => this.encode(resolved ?? undefined))
+                            .catch((err) => this.encode(resolveErrorForSandbox(err, this.registry)));
+                    }
 
                     return this.encode(result ?? undefined);
                 }

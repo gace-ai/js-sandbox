@@ -1,4 +1,4 @@
-import type { QuickJSContext } from 'quickjs-emscripten';
+import type { QuickJSContext, QuickJSHandle } from 'quickjs-emscripten';
 import { Bridge } from './bridge';
 import { ReferenceRegistry } from './registry';
 import { createRef, createMutableRef, createValue, createNamespace } from './wrappers';
@@ -83,6 +83,7 @@ export class Sandbox {
     private vm: QuickJSContext;
     private bridge: Bridge;
     private registry: ReferenceRegistry;
+    private pendingHandles: QuickJSHandle[] = [];
 
     constructor(opts: SandboxOptions) {
         this.vm = opts.vm;
@@ -129,6 +130,97 @@ export class Sandbox {
         result.dispose();
     }
 
+    /**
+     * Evaluate code that may return a Promise (e.g. async tool functions).
+     *
+     * If the eval result is a QuickJS promise, host-side `.then`/`.catch`
+     * callbacks are attached and `executePendingJobs` is called so the
+     * async chain (including host-initiated promise resolutions from the
+     * bridge) can settle.
+     */
+    async evalCodeAsync(code: string): Promise<unknown> {
+        const result = this.vm.evalCode(code);
+        if (result.error) {
+            const err = this.vm.dump(result.error);
+            result.error.dispose();
+            throw new Error(`Sandbox execution error: ${JSON.stringify(err)}`);
+        }
+
+        return this.resolveHandle(result.value);
+    }
+
+    /**
+     * Call a function defined on the sandbox's globalThis and resolve its
+     * return value, awaiting it if it is a QuickJS promise.
+     */
+    async callFunction(name: string, ...args: unknown[]): Promise<unknown> {
+        const fn = this.vm.getProp(this.vm.global, name);
+
+        const argHandles: QuickJSHandle[] = args.map((arg) => {
+            if (arg === undefined) return this.vm.undefined;
+            if (arg === null) return this.vm.null;
+            const json = JSON.stringify(arg);
+            const parsed = this.vm.evalCode(`(${json})`);
+            if (parsed.error) {
+                parsed.error.dispose();
+                return this.vm.undefined;
+            }
+            return parsed.value;
+        });
+
+        const callResult = this.vm.callFunction(fn, this.vm.global, ...argHandles);
+
+        for (const h of argHandles) h.dispose();
+        fn.dispose();
+
+        if (callResult.error) {
+            const err = this.vm.dump(callResult.error);
+            callResult.error.dispose();
+            throw new Error(`Sandbox call error: ${JSON.stringify(err)}`);
+        }
+
+        return this.resolveHandle(callResult.value);
+    }
+
+    private async resolveHandle(handle: QuickJSHandle): Promise<unknown> {
+        const thenProp = this.vm.getProp(handle, 'then');
+        const isPromise = this.vm.typeof(thenProp) === 'function';
+        thenProp.dispose();
+
+        if (!isPromise) {
+            const value = this.vm.dump(handle);
+            handle.dispose();
+            return value;
+        }
+
+        return new Promise<unknown>((resolve, reject) => {
+            const onResolve = this.vm.newFunction('__evalResolve', (valHandle: QuickJSHandle) => {
+                resolve(this.vm.dump(valHandle));
+            });
+
+            const onReject = this.vm.newFunction('__evalReject', (errHandle: QuickJSHandle) => {
+                const err = this.vm.dump(errHandle);
+                reject(new Error(typeof err === 'string' ? err : JSON.stringify(err)));
+            });
+
+            const thenMethod = this.vm.getProp(handle, 'then');
+            const thenResult = this.vm.callFunction(thenMethod, handle, onResolve, onReject);
+            thenMethod.dispose();
+
+            if (thenResult.error) {
+                const err = this.vm.dump(thenResult.error);
+                thenResult.error.dispose();
+                reject(new Error(JSON.stringify(err)));
+            } else {
+                thenResult.value.dispose();
+            }
+
+            handle.dispose();
+            this.pendingHandles.push(onResolve, onReject);
+            this.vm.runtime.executePendingJobs();
+        });
+    }
+
     private injectPolyfill(): void {
         // Inject environment polyfills first (btoa, atob, TextEncoder, TextDecoder)
         this.evalCode(envPolyfill);
@@ -150,6 +242,10 @@ export class Sandbox {
     }
 
     dispose(): void {
+        for (const h of this.pendingHandles) {
+            h.dispose();
+        }
+        this.pendingHandles = [];
         this.bridge.dispose();
         this.registry.clear();
     }
